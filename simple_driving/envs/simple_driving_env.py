@@ -12,6 +12,13 @@ import time
 
 RENDER_HEIGHT = 720
 RENDER_WIDTH = 960
+OBSTACLE_HEIGHT = 0.07 # Make sure this matches your cube.urdf box size
+CAR_START_Z = 0.02     # Initial Z height for the car
+GOAL_VISUAL_Z = 0.01   
+MIN_CAR_START_DIST = 5.0
+MAX_CAR_START_DIST = 9.0
+OBSTACLE_MIN_T = 0.25 
+OBSTACLE_MAX_T = 0.75 
 
 class SimpleDrivingEnv(gym.Env):
     metadata = {'render.modes': ['human', 'fp_camera', 'tp_camera']}
@@ -184,6 +191,7 @@ class SimpleDrivingEnv(gym.Env):
         return [seed]
 
     def reset(self):
+    
         self._p.resetSimulation()
         self._p.setTimeStep(self._timeStep)
         self._p.setGravity(0, 0, -10)
@@ -191,8 +199,13 @@ class SimpleDrivingEnv(gym.Env):
         Plane(self._p)
         self.car = Car(self._p)
         self._envStepCounter = 0
-
-        # Set the goal to a random target
+    
+        # --- Goal Position (Fixed at Origin) ---
+        goal_x, goal_y = 0.0, 0.0
+        self.goal = (goal_x, goal_y) # Store the target coordinates
+    
+        # --- Random Car Starting Position ---
+        # Calculate random distance and angle from origin (goal)
         x = (self.np_random.uniform(5, 9) if self.np_random.integers(2) else
              self.np_random.uniform(-9, -5))
         y = (self.np_random.uniform(5, 9) if self.np_random.integers(2) else
@@ -200,37 +213,35 @@ class SimpleDrivingEnv(gym.Env):
         self.goal = (x, y)
         self.done = False
         self.reached_goal = False
-
-        # Visual element of the goal
-        self.goal_object = Goal(self._p, self.goal)
-        min_t = 0.25
-        max_t = 0.75
-        t = np.random.uniform(min_t, max_t)
-        # Determine a random position for the obstacle
-        obstacle_x = t * x
-        obstacle_y = t * y
-        while True:
-            obstacle_x = self.np_random.uniform(-8, 8)
-            obstacle_y = self.np_random.uniform(-8, 8)
-            dist_from_origin = math.sqrt(obstacle_x**2 + obstacle_y**2)
-            dist_from_goal = math.sqrt((obstacle_x - x)**2 + (obstacle_y - y)**2)
-            if dist_from_origin > min_dist_from_origin and dist_from_goal > min_dist_from_goal:
-                break
-
-        # Set z position based on URDF definition (box size is 0.05)
-        obstacle_z = 0
-        self.obstacle_position = [obstacle_x, obstacle_y, obstacle_z] # Store position
     
-        # Instantiate the Obstacle class, passing the client and position
-        # The Obstacle class now handles the actual loadURDF call
+        # --- Load Goal Visual Element at Origin ---
+        self.goal_object = Goal(self._p, self.goal)
+    
+        # --- Obstacle Placement ---
+        # Define t: fractional distance along path from car start (P_car) to goal (P_goal=0)
+        # P_obstacle = P_car + t * (P_goal - P_car) = P_car + t * (-P_car) = (1 - t) * P_car
+        t = self.np_random.uniform(OBSTACLE_MIN_T, OBSTACLE_MAX_T)
+    
+        # Calculate obstacle's X, Y position based on t and car's start position
+        obstacle_x = (1 - t) * x
+        obstacle_y = (1 - t) * y
+        obstacle_z = OBSTACLE_HEIGHT / 2 # Place center so bottom is at z=0
+    
+        # Store the calculated 3D position
+        self.obstacle_position = [obstacle_x, obstacle_y, obstacle_z]
+    
+        # --- Load Obstacle Visual/Collision ---
+        # Instantiate the Obstacle class, passing the client and calculated position
         self.obstacle = Obstacle(self._p, self.obstacle_position)
-        
-        # Get observation to return
-        carpos = self.car.get_observation()
-
-        self.prev_dist_to_goal = math.sqrt(((carpos[0] - self.goal[0]) ** 2 +
-                                           (carpos[1] - self.goal[1]) ** 2))
+    
+    
+        self.prev_dist_to_goal = math.sqrt(((car_start_x - goal_x)**2 +
+                                             (car_start_y - goal_y)**2))
+    
+    
         car_ob = self.getExtendedObservation()
+    
+        # --- Return Initial Observation ---
         return np.array(car_ob, dtype=np.float32)
 
     def render(self, mode='human'):
