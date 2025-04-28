@@ -54,8 +54,8 @@ class SimpleDrivingEnv(gym.Env):
         self.render_rot_matrix = None
         self.reset()
         self._envStepCounter = 0
-        self._obstacle_prox_threshold = 2.0  # Define threshold distance
-        self._obstacle_penalty_amount = 10.0 # Define penalty amount
+        self._obstacle_prox_threshold = 1.0  # Define threshold distance
+        self._obstacle_penalty_amount = 5.0 # Define penalty amount
 
     def step(self, action):
         # Feed action to the car
@@ -126,7 +126,7 @@ class SimpleDrivingEnv(gym.Env):
             if dist_to_obstacle < self._obstacle_prox_threshold:
                 obstacle_penalty = -self._obstacle_penalty_amount
                 if self._renders or True: # Print penalty info even if not rendering for debug
-                   print(f"Step {self._envStepCounter}: Too close to obstacle! Dist: {dist_to_obstacle:.2f}, Penalty: {obstacle_penalty}")
+                   print(f"Too close to obstacle! Dist: {dist_to_obstacle:.2f}, Penalty: {obstacle_penalty}")
 
         # Add obstacle penalty to the reward
         reward += obstacle_penalty
