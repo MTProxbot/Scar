@@ -49,46 +49,135 @@ class SimpleDrivingEnv(gym.Env):
         self._envStepCounter = 0
 
     def step(self, action):
-        # Feed action to the car and get observation of car's state
+        # Feed action to the car
         if (self._isDiscrete):
-            fwd = [-1, -1, -1, 0, 0, 0, 1, 1, 1]
-            steerings = [-0.6, 0, 0.6, -0.6, 0, 0.6, -0.6, 0, 0.6]
+            # Example discrete actions -> continuous [throttle, steering]
+            fwd = [-1, -1, -1, 0, 0, 0, 1, 1, 1] # Example throttle mapping
+            steerings = [-0.6, 0, 0.6, -0.6, 0, 0.6, -0.6, 0, 0.6] # Example steering mapping
+            if action < 0 or action >= len(fwd):
+                raise ValueError(f"Invalid discrete action: {action}")
             throttle = fwd[action]
             steering_angle = steerings[action]
-            action = [throttle, steering_angle]
-        self.car.apply_action(action)
+            cont_action = [throttle, steering_angle] # Converted action
+        else:
+            cont_action = action # Assume action is already [throttle, steering]
+
+        # Apply the continuous action to the car model
+        if self.car:
+            self.car.apply_action(cont_action)
+        else:
+             raise RuntimeError("Car object not initialized. Call reset() first.")
+
+
+        # Step simulation multiple times
+        car_ob = None # Initialize observation variable
+        carpos = None # Initialize car position variable
         for i in range(self._actionRepeat):
-          self._p.stepSimulation()
-          if self._renders:
-            time.sleep(self._timeStep)
+            self._p.stepSimulation()
+            if self._renders:
+                time.sleep(self._timeStep)
 
-          carpos, carorn = self._p.getBasePositionAndOrientation(self.car.car)
-          goalpos, goalorn = self._p.getBasePositionAndOrientation(self.goal_object.goal)
-          car_ob = self.getExtendedObservation()
+            # Get current state inside the loop for termination check and final observation
+            # Query PyBullet for the car's state
+            car_id = self.car.get_ids()
+            current_carpos, carorn = self._p.getBasePositionAndOrientation(car_id)
+            carpos = list(current_carpos) # Store the latest position
 
-          if self._termination():
-            self.done = True
-            break
-          self._envStepCounter += 1
+            # Get the observation state (e.g., pos, vel, orientation)
+            car_ob = self.getExtendedObservation() # Based on latest state
 
-        # Compute reward as L2 change in distance to goal
-        # dist_to_goal = math.sqrt(((car_ob[0] - self.goal[0]) ** 2 +
-                                  # (car_ob[1] - self.goal[1]) ** 2))
-        dist_to_goal = math.sqrt(((carpos[0] - goalpos[0]) ** 2 +
-                                  (carpos[1] - goalpos[1]) ** 2))
-        # reward = max(self.prev_dist_to_goal - dist_to_goal, 0)
+            # Check for termination conditions *during* the steps
+            if self._termination(carpos): # Pass current pos to termination check
+                self.done = True
+                print(f"INFO: Termination condition met at step {self._envStepCounter}")
+                break # Exit action repeat loop early if terminated
+
+            self._envStepCounter += 1 # Increment counter only if simulation step was taken
+
+        # --- Calculations AFTER the action repeat loop ---
+
+        # Ensure carpos is available (might not be if _actionRepeat is 0 or terminated instantly)
+        if carpos is None:
+            if self.car:
+                carpos, _ = self._p.getBasePositionAndOrientation(self.car.get_ids())
+                carpos = list(carpos)
+            else:
+                 # Fallback if car doesn't exist - should not happen if reset correctly
+                 carpos = [0,0,0]
+                 print("WARN: Car position unknown after step loop.")
+
+
+        # Get final car position
+        car_x, car_y = carpos[0], carpos[1]
+
+        # Get goal position coordinates from self.goal tuple
+        x, y = self.goal[0], self.goal[1] # Use x, y as requested
+
+        # Compute distance to goal based on final car position
+        dist_to_goal = math.sqrt(((car_x - x)**2 + (car_y - y)**2))
+
+        # Calculate reward (negative distance to goal)
         reward = -dist_to_goal
-        self.prev_dist_to_goal = dist_to_goal
+        # Optional: Reward based on progress (uncomment if preferred)
+        # reward = self.prev_dist_to_goal - dist_to_goal
+        # self.prev_dist_to_goal = dist_to_goal
 
-        # Done by reaching goal
-        if dist_to_goal < 1.5 and not self.reached_goal:
-            #print("reached goal")
-            self.done = True
+        # --- Obstacle Avoidance Penalty ---
+        obstacle_penalty = 0.0
+        # Check if obstacle exists (check ID) and get its fixed position
+        # Obstacle must have been successfully loaded in reset()
+        if (hasattr(self, 'obstacle') and self.obstacle and
+            self.obstacle.get_id() is not None and hasattr(self, 'obstacle_position')):
+
+            obstacle_x = self.obstacle_position[0]
+            obstacle_y = self.obstacle_position[1]
+
+            # Calculate distance from car center to obstacle center (horizontal plane)
+            dist_to_obstacle = math.sqrt(((car_x - obstacle_x)**2 + (car_y - obstacle_y)**2))
+
+            # Apply penalty if too close
+            if dist_to_obstacle < self._obstacle_prox_threshold:
+                obstacle_penalty = -self._obstacle_penalty_amount
+                if self._renders or True: # Print penalty info even if not rendering for debug
+                   print(f"Step {self._envStepCounter}: Too close to obstacle! Dist: {dist_to_obstacle:.2f}, Penalty: {obstacle_penalty}")
+
+        # Add obstacle penalty to the reward
+        reward += obstacle_penalty
+        # --- End Obstacle Penalty ---
+
+        # --- Goal Reached Check ---
+        # Done by reaching goal (check uses final dist_to_goal)
+        if dist_to_goal < self._goal_reach_threshold and not self.reached_goal:
+            print(f"INFO: Reached goal at step {self._envStepCounter}!")
+            self.done = True # Set done flag
             self.reached_goal = True
-            reward += 50
+            reward += self._goal_bonus_reward # Add goal bonus reward
 
-        ob = car_ob
-        return ob, reward, self.done, dict()
+        # --- Max Steps Check (Alternative termination) ---
+        # Example: Add max steps termination if not done by other means
+        max_steps = 1000 # Example max steps per episode
+        if not self.done and self._envStepCounter >= max_steps:
+             print(f"INFO: Max steps ({max_steps}) reached.")
+             self.done = True
+             # Optional penalty for running out of time could be added here
+
+        # --- Final Observation ---
+        # Use the last observation captured in the loop or get a fresh one if loop didn't run
+        if car_ob is None:
+             ob = self.getExtendedObservation()
+             print("WARN: Using observation fetched after loop.")
+        else:
+             ob = car_ob
+
+        # Ensure the observation is a numpy float32 array
+        if not isinstance(ob, np.ndarray):
+            ob = np.array(ob, dtype=np.float32)
+        elif ob.dtype != np.float32:
+            ob = ob.astype(np.float32)
+
+        # Return standard Gym format (using only `done` flag)
+        # info dict is empty as per original structure
+        return ob, reward, self.done, {}
 
     def seed(self, seed=None):
         self.np_random, seed = gym.utils.seeding.np_random(seed)
@@ -116,18 +205,18 @@ class SimpleDrivingEnv(gym.Env):
         self.goal_object = Goal(self._p, self.goal)
         
         # Determine a random position for the obstacle
-        min_dist_from_origin = 2.0
-        min_dist_from_goal = 2.0
+        obstacle_x = t * x
+        obstacle_y = t * y
         while True:
             obstacle_x = self.np_random.uniform(-8, 8)
             obstacle_y = self.np_random.uniform(-8, 8)
             dist_from_origin = math.sqrt(obstacle_x**2 + obstacle_y**2)
-            dist_from_goal = math.sqrt((obstacle_x - goal_x)**2 + (obstacle_y - goal_y)**2)
+            dist_from_goal = math.sqrt((obstacle_x - x)**2 + (obstacle_y - y)**2)
             if dist_from_origin > min_dist_from_origin and dist_from_goal > min_dist_from_goal:
                 break
 
         # Set z position based on URDF definition (box size is 0.05)
-        obstacle_z = 0.05 / 2
+        obstacle_z = 0
         self.obstacle_position = [obstacle_x, obstacle_y, obstacle_z] # Store position
     
         # Instantiate the Obstacle class, passing the client and position
