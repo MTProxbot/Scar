@@ -109,8 +109,10 @@ class SimpleDrivingEnv(gym.Env):
         obstacle_penalty = 0.0
         # Check if obstacle exists (check ID) and get its fixed position
         # Obstacle must have been successfully loaded in reset()
-        if (hasattr(self, 'obstacle') and self.obstacle and
-            self.obstacle.get_id() is not None and hasattr(self, 'obstacle_position')):
+        if (hasattr(self, 'obstacle') and self.obstacle is not None and
+            hasattr(self.obstacle, 'get_ids') and
+            self.obstacle.get_ids() >= 0 and
+            hasattr(self, 'obstacle_position')):
 
             obstacle_x = self.obstacle_position[0]
             obstacle_y = self.obstacle_position[1]
