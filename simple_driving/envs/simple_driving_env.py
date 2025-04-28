@@ -77,57 +77,33 @@ class SimpleDrivingEnv(gym.Env):
 
 
         # Step simulation multiple times
-        car_ob = None # Initialize observation variable
-        carpos = None # Initialize car position variable
         for i in range(self._actionRepeat):
-            self._p.stepSimulation()
-            if self._renders:
-                time.sleep(self._timeStep)
+          self._p.stepSimulation()
+          if self._renders:
+            time.sleep(self._timeStep)
 
-            # Get current state inside the loop for termination check and final observation
-            # Query PyBullet for the car's state
-            car_id = self.car.get_ids()
-            current_carpos, carorn = self._p.getBasePositionAndOrientation(car_id)
-            carpos = list(current_carpos) # Store the latest position
+          carpos, carorn = self._p.getBasePositionAndOrientation(self.car.car)
+          goalpos, goalorn = self._p.getBasePositionAndOrientation(self.goal_object.goal)
+          car_ob = self.getExtendedObservation()
 
-            # Get the observation state (e.g., pos, vel, orientation)
-            car_ob = self.getExtendedObservation() # Based on latest state
+          if self._termination():
+            self.done = True
+            break
+          self._envStepCounter += 1
 
-            # Check for termination conditions *during* the steps
-            if self._termination(carpos): # Pass current pos to termination check
-                self.done = True
-                print(f"INFO: Termination condition met at step {self._envStepCounter}")
-                break # Exit action repeat loop early if terminated
-
-            self._envStepCounter += 1 # Increment counter only if simulation step was taken
 
         # --- Calculations AFTER the action repeat loop ---
-
-        # Ensure carpos is available (might not be if _actionRepeat is 0 or terminated instantly)
-        if carpos is None:
-            if self.car:
-                carpos, _ = self._p.getBasePositionAndOrientation(self.car.get_ids())
-                carpos = list(carpos)
-            else:
-                 # Fallback if car doesn't exist - should not happen if reset correctly
-                 carpos = [0,0,0]
-                 print("WARN: Car position unknown after step loop.")
-
 
         # Get final car position
         car_x, car_y = carpos[0], carpos[1]
 
-        # Get goal position coordinates from self.goal tuple
-        x, y = self.goal[0], self.goal[1] # Use x, y as requested
-
         # Compute distance to goal based on final car position
-        dist_to_goal = math.sqrt(((car_x - x)**2 + (car_y - y)**2))
+        dist_to_goal = math.sqrt(((carpos[0] - goalpos[0]) ** 2 +
+                                  (carpos[1] - goalpos[1]) ** 2))
 
         # Calculate reward (negative distance to goal)
         reward = -dist_to_goal
-        # Optional: Reward based on progress (uncomment if preferred)
-        # reward = self.prev_dist_to_goal - dist_to_goal
-        # self.prev_dist_to_goal = dist_to_goal
+        self.prev_dist_to_goal = dist_to_goal
 
         # --- Obstacle Avoidance Penalty ---
         obstacle_penalty = 0.0
@@ -154,37 +130,14 @@ class SimpleDrivingEnv(gym.Env):
 
         # --- Goal Reached Check ---
         # Done by reaching goal (check uses final dist_to_goal)
-        if dist_to_goal < self._goal_reach_threshold and not self.reached_goal:
+        if dist_to_goal < 1.5 and not self.reached_goal:
+            reward += 50
             print(f"INFO: Reached goal at step {self._envStepCounter}!")
             self.done = True # Set done flag
             self.reached_goal = True
-            reward += self._goal_bonus_reward # Add goal bonus reward
-
-        # --- Max Steps Check (Alternative termination) ---
-        # Example: Add max steps termination if not done by other means
-        max_steps = 1000 # Example max steps per episode
-        if not self.done and self._envStepCounter >= max_steps:
-             print(f"INFO: Max steps ({max_steps}) reached.")
-             self.done = True
-             # Optional penalty for running out of time could be added here
-
-        # --- Final Observation ---
-        # Use the last observation captured in the loop or get a fresh one if loop didn't run
-        if car_ob is None:
-             ob = self.getExtendedObservation()
-             print("WARN: Using observation fetched after loop.")
-        else:
-             ob = car_ob
-
-        # Ensure the observation is a numpy float32 array
-        if not isinstance(ob, np.ndarray):
-            ob = np.array(ob, dtype=np.float32)
-        elif ob.dtype != np.float32:
-            ob = ob.astype(np.float32)
-
-        # Return standard Gym format (using only `done` flag)
-        # info dict is empty as per original structure
-        return ob, reward, self.done, {}
+            
+        ob = car_ob
+        return ob, reward, self.done, dict()
 
     def seed(self, seed=None):
         self.np_random, seed = gym.utils.seeding.np_random(seed)
@@ -199,10 +152,6 @@ class SimpleDrivingEnv(gym.Env):
         Plane(self._p)
         self.car = Car(self._p)
         self._envStepCounter = 0
-    
-        # --- Goal Position (Fixed at Origin) ---
-        goal_x, goal_y = 0.0, 0.0
-        self.goal = (goal_x, goal_y) # Store the target coordinates
     
         # --- Random Car Starting Position ---
         # Calculate random distance and angle from origin (goal)
@@ -233,11 +182,10 @@ class SimpleDrivingEnv(gym.Env):
         # --- Load Obstacle Visual/Collision ---
         # Instantiate the Obstacle class, passing the client and calculated position
         self.obstacle = Obstacle(self._p, self.obstacle_position)
+        carpos = self.car.get_observation()
     
-    
-        self.prev_dist_to_goal = math.sqrt(((car_start_x - goal_x)**2 +
-                                             (car_start_y - goal_y)**2))
-    
+        self.prev_dist_to_goal = math.sqrt(((carpos[0] - self.goal[0]) ** 2 +
+                                           (carpos[1] - self.goal[1]) ** 2))
     
         car_ob = self.getExtendedObservation()
     
