@@ -19,7 +19,7 @@
     <visual>
       <origin rpy="0 0 0" xyz="0 0 0"/>
       <geometry>
-        <box size="0.07 0.07 0.07"/>
+        <box size="0.75 0.75 0.75"/>
       </geometry>
       <material name="white"/>
     </visual>
@@ -27,7 +27,7 @@
     <collision>
       <origin rpy="0 0 0" xyz="0 0 0"/>
       <geometry>
-        <box size="0.07 0.07 0.07"/>
+        <box size="0.75 0.75 0.75"/>
       </geometry>
 
       <contact>
