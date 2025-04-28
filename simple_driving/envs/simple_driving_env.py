@@ -54,6 +54,8 @@ class SimpleDrivingEnv(gym.Env):
         self.render_rot_matrix = None
         self.reset()
         self._envStepCounter = 0
+        self._obstacle_prox_threshold = 2.0  # Define threshold distance
+        self._obstacle_penalty_amount = 10.0 # Define penalty amount
 
     def step(self, action):
         # Feed action to the car
