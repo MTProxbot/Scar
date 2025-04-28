@@ -6,6 +6,7 @@ from pybullet_utils import bullet_client as bc
 from simple_driving.resources.car import Car
 from simple_driving.resources.plane import Plane
 from simple_driving.resources.goal import Goal
+from simple_driving.resources.obstacle import Obstacle
 import matplotlib.pyplot as plt
 import time
 
@@ -113,7 +114,26 @@ class SimpleDrivingEnv(gym.Env):
 
         # Visual element of the goal
         self.goal_object = Goal(self._p, self.goal)
+        
+        # Determine a random position for the obstacle
+        min_dist_from_origin = 2.0
+        min_dist_from_goal = 2.0
+        while True:
+            obstacle_x = self.np_random.uniform(-8, 8)
+            obstacle_y = self.np_random.uniform(-8, 8)
+            dist_from_origin = math.sqrt(obstacle_x**2 + obstacle_y**2)
+            dist_from_goal = math.sqrt((obstacle_x - goal_x)**2 + (obstacle_y - goal_y)**2)
+            if dist_from_origin > min_dist_from_origin and dist_from_goal > min_dist_from_goal:
+                break
 
+        # Set z position based on URDF definition (box size is 0.05)
+        obstacle_z = 0.05 / 2
+        self.obstacle_position = [obstacle_x, obstacle_y, obstacle_z] # Store position
+    
+        # Instantiate the Obstacle class, passing the client and position
+        # The Obstacle class now handles the actual loadURDF call
+        self.obstacle = Obstacle(self._p, self.obstacle_position)
+        
         # Get observation to return
         carpos = self.car.get_observation()
 
