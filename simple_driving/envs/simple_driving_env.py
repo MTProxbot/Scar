@@ -203,7 +203,9 @@ class SimpleDrivingEnv(gym.Env):
 
         # Visual element of the goal
         self.goal_object = Goal(self._p, self.goal)
-        
+        min_t = 0.25
+        max_t = 0.75
+        t = np.random.uniform(min_t, max_t)
         # Determine a random position for the obstacle
         obstacle_x = t * x
         obstacle_y = t * y
